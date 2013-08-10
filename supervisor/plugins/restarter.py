@@ -16,37 +16,86 @@ import pkg_resources
 pkg_resources.require('supervisor >= 3.0a')
 
 from supervisor.xmlrpc import Faults,RPCError
-from supervisor.states import RUNNING_STATES,STOPPED_STATES
+from supervisor.states import RUNNING_STATES,STOPPED_STATES,SupervisorStates
 from supervisor.http import NOT_DONE_YET
+from weakref import WeakValueDictionary
+
+API_VERSION = '3.0'
 
 class RPCInterface(object):
   def __init__(self, supervisord, delay):
     self.supervisord = supervisord
     self.delay = delay
+    self._version = None
     super(RPCInterface,self).__init__()
+
+  def _update(self,text):
+    self.update_text = text
+    if self.supervisord.options.mood < SupervisorStates.RUNNING:
+      raise RPCError(Faults.SHUTDOWN_STATE)
+
+  def getPluginVersion(self):
+    '''Return the plugin version that provides rpc methods for this namespace.
+
+    @return string version version id
+    '''
+    from os.path import join
+
+    self._update('getPluginVersion')
+    if self._version is None:
+      version_txt = join(here,'%s_version.txt' % (__name__.split('.')[-1],))
+      try:
+        f = open(version_txt,'r')
+        try:
+          self._version = f.read()
+        finally:
+          f.close()
+      except IOError,e:
+        raise RPCError(Faults.FAILED,str(e))
+    return self._version
+
+  def getAPIVersion(self):
+    '''Return the version of the RPC API used by this supervisord plugin.
+
+    @return string version version id
+    '''
+    self._update('getAPIVersion')
+    return API_VERSION
 
   def restartProcessGroup(self, name):
     '''Restart all procs in supervisor process group .. rapidly!
     Returns a list of rpc faults if an error occurs.
 
     @param string name          name of process group to restart
-    @return boolean result       true if successful
+    @return boolean result      true if successful
     '''
-
+    self._update('restartProcessGroup')
     group = self.supervisord.process_groups.get(name)
     if group is None:
       raise RPCError(Faults.BAD_NAME)
 
-    processes = dict([(p.config.name,p) for p in group.get_unstopped_processes()])
+    processes = WeakValueDictionary([(p.config.name,p) for p in group.get_unstopped_processes()])
     procnames = processes.keys()
     unstopped = set(procnames)
     started = set()
     ignore = set()
     errs = list()
     
+    def get_proc(name):
+      try:
+        return processes[name]
+      except KeyError:
+        if name in procnames:
+          procnames.remove(name)
+        unstopped.discard(name)
+        started.discard(name)
+        ignore.discard(name)
+
     def restartem():
       for name in sorted(procnames):
-        p = processes[name]
+        p = get_proc(name)
+        if p is None:
+          continue
         if name not in unstopped and name not in started and name not in ignore:
           state = p.get_state()
           if state in RUNNING_STATES:
@@ -63,9 +112,11 @@ class RPCInterface(object):
             ignore.add(name)
 
       for name in sorted(unstopped):
-        p = processes[name]
+        p = get_proc(name)
+        if p is None:
+          continue
         state = p.get_state()
-        unstopped.remove(name)
+        unstopped.discard(name)
         if state in RUNNING_STATES:
           msg = p.stop()
           if msg is not None:

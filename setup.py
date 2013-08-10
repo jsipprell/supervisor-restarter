@@ -23,7 +23,7 @@ try:
 except:
   here = os.path.abspath(os.path.normpath(os.path.dirname(__file__)))
 
-version_txt = os.path.join(here,'version.txt')
+version_txt = os.path.join(here,'supervisor','plugins','restarter_version.txt')
 supervisor_restarter_version = open(version_txt).read().strip()
 requires = ['setuptools','supervisor >= 3.0a']
 
@@ -40,6 +40,7 @@ Standard supervisor has a design flaw which makes restarting process groups with
 numbers of processes VERY slow.
 ''',
         packages=find_packages(),
+        include_package_data=True,
         namespace_packages=['supervisor','supervisor.plugins'],
         install_requires=requires,
         zip_safe=False,

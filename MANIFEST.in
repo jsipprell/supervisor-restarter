@@ -1,8 +1,8 @@
 exclude *.py
 include *.md
 include CHANGES.txt
-include version.txt
 include ez_setup.py setup.py setup.cfg
 include supervisor/*.py
 include supervisor/plugins/*.py
+include supervisor/plugins/*version.txt
 include rpm/*
