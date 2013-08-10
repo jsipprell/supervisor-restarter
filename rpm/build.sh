@@ -1,0 +1,1 @@
+%__python setup.py build

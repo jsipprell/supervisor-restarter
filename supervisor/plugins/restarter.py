@@ -1,0 +1,139 @@
+# Copyright [2013] Jesse Sipprell <jessesipprell@gmail.com>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import pkg_resources
+pkg_resources.require('supervisor >= 3.0a')
+
+from supervisor.xmlrpc import Faults,RPCError
+from supervisor.states import RUNNING_STATES,STOPPED_STATES,SupervisorStates
+from supervisor.http import NOT_DONE_YET
+from weakref import WeakValueDictionary
+
+API_VERSION = '3.0'
+
+class RPCInterface(object):
+  def __init__(self, supervisord, delay):
+    self.supervisord = supervisord
+    self.delay = delay
+    self._version = None
+    super(RPCInterface,self).__init__()
+
+  def _update(self,text):
+    self.update_text = text
+    if self.supervisord.options.mood < SupervisorStates.RUNNING:
+      raise RPCError(Faults.SHUTDOWN_STATE)
+
+  def getPluginVersion(self):
+    '''Return the plugin version that provides rpc methods for this namespace.
+
+    @return string version version id
+    '''
+    from os.path import join
+
+    self._update('getPluginVersion')
+    if self._version is None:
+      version_txt = join(here,'%s_version.txt' % (__name__.split('.')[-1],))
+      try:
+        f = open(version_txt,'r')
+        try:
+          self._version = f.read()
+        finally:
+          f.close()
+      except IOError,e:
+        raise RPCError(Faults.FAILED,str(e))
+    return self._version
+
+  def getAPIVersion(self):
+    '''Return the version of the RPC API used by this supervisord plugin.
+
+    @return string version version id
+    '''
+    self._update('getAPIVersion')
+    return API_VERSION
+
+  def restartProcessGroup(self, name):
+    '''Restart all procs in supervisor process group .. rapidly!
+    Returns a list of rpc faults if an error occurs.
+
+    @param string name          name of process group to restart
+    @return boolean result      true if successful
+    '''
+    self._update('restartProcessGroup')
+    group = self.supervisord.process_groups.get(name)
+    if group is None:
+      raise RPCError(Faults.BAD_NAME)
+
+    processes = WeakValueDictionary([(p.config.name,p) for p in group.get_unstopped_processes()])
+    procnames = processes.keys()
+    unstopped = set(procnames)
+    started = set()
+    ignore = set()
+    errs = list()
+    
+    def get_proc(name):
+      try:
+        return processes[name]
+      except KeyError:
+        if name in procnames:
+          procnames.remove(name)
+        unstopped.discard(name)
+        started.discard(name)
+        ignore.discard(name)
+
+    def restartem():
+      for name in sorted(procnames):
+        p = get_proc(name)
+        if p is None:
+          continue
+        if name not in unstopped and name not in started and name not in ignore:
+          state = p.get_state()
+          if state in RUNNING_STATES:
+            errs.append(RPCError(Faults.FAILED,'%s: already running' % (name,)))
+            ignore.add(name)
+          elif state in STOPPED_STATES:
+            p.spawn()
+            if p.spawnerr:
+              errs.append(RPCError(Faults.SPAWN_ERROR,name))
+              ignore.add(name)
+            else:
+              started.add(name)
+          else:
+            ignore.add(name)
+
+      for name in sorted(unstopped):
+        p = get_proc(name)
+        if p is None:
+          continue
+        state = p.get_state()
+        unstopped.discard(name)
+        if state in RUNNING_STATES:
+          msg = p.stop()
+          if msg is not None:
+            errs.append(RPCError(Faults.FAILED,'%s: %s' % (name,msg)))
+            ignore.add(name)
+        elif state not in STOPPED_STATES:
+          ignore.add(name)
+
+      if not unstopped and started.union(ignore) == set(procnames):
+        if errs:
+          return errs
+        return True
+      return NOT_DONE_YET
+ 
+    restartem.delay = self.delay
+    restartem.rpcinterface = self
+    return restartem
+        
+def make_rpcinterface(supervisord,**config):  
+  return RPCInterface(supervisord,float(config.get('delay',0.2)))
