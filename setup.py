@@ -42,5 +42,8 @@ numbers of processes VERY slow.
         packages=find_packages(),
         namespace_packages=['supervisor','supervisor.plugins'],
         install_requires=requires,
-        zip_safe=False
+        zip_safe=False,
+        entry_points={
+          'console_scripts': ['supervisorctl_restart_group = supervisor.plugins.supervisorctl_restart_group:main'],
+        }
       )
