@@ -144,7 +144,7 @@ def main(args=None,options=None):
   if result:
     if isinstance(result,(list,tuple)):
       for e in result:
-        ctl.output_error('%s: ERROR (%s)' % (group,e.faultString))
+        ctl.output_error('ERROR (%s)' % e['text'])
       sys.exit(len(result))
     ctl.output('%s: restarted' % group)
   else:
