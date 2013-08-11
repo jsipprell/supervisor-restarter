@@ -36,3 +36,19 @@ the `restartProcessGroup` rpc call. *A default of 0.2 seconds is used if none is
     >>> server = xmlrpclib.Server('http://localhost:9001/RPC2')
     >>> server.restarter.restartProcessGroup('someconfiguredgroup')
     True
+
+## Client Script
+
+Eventually the plan is to extend `supervisorctl` in a similar fashion. However, for the moment, it's not possible to
+extend the ctl interface via a _supervisor.d/_ *.conf file, only by editing the main config. Thus, the following tool is
+now included in this package:
+
+#### supervisorctl_restart_group
+
+Restarts the process group passed on the command line. Takes all the same arguments as `supervisorctl`.
+
+Example:
+
+    supervisorctl_restart_group -s http://myserver foobar
+    
+Restarts the foobar process group on _myserver_.
