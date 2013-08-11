@@ -16,7 +16,7 @@ import pkg_resources
 pkg_resources.require('supervisor >= 3.0a')
 
 from supervisor.xmlrpc import Faults,RPCError
-from supervisor.states import RUNNING_STATES,STOPPED_STATES,SupervisorStates
+from supervisor.states import RUNNING_STATES,STOPPED_STATES,ProcessStates,SupervisorStates
 from supervisor.http import NOT_DONE_YET
 from weakref import WeakValueDictionary
 
@@ -74,8 +74,10 @@ class RPCInterface(object):
     if group is None:
       raise RPCError(Faults.BAD_NAME)
 
-    processes = WeakValueDictionary([(p.config.name,p) for p in group.get_unstopped_processes()])
-    procnames = processes.keys()
+    transit_states = (ProcessStates.STARTING,ProcessStates.STOPPING)
+    processes = WeakValueDictionary((p.config.name,p) for p in group.processes.itervalues())
+    allprocs = set(processes.keys())
+    procnames = [p.config.name for p in group.get_unstopped_processes()]
     unstopped = set(procnames)
     started = set()
     ignore = set()
@@ -92,26 +94,24 @@ class RPCInterface(object):
         ignore.discard(name)
 
     def restartem():
-      for name in sorted(procnames):
+      for name in sorted(allprocs):
         p = get_proc(name)
         if p is None:
           continue
         if name not in unstopped and name not in started and name not in ignore:
           state = p.get_state()
           if state in RUNNING_STATES:
-            errs.append(RPCError(Faults.FAILED,'%s: already running' % (name,)))
-            ignore.add(name)
+            started.add(name)
           elif state in STOPPED_STATES:
             p.spawn()
             if p.spawnerr:
               errs.append(RPCError(Faults.SPAWN_ERROR,name))
               ignore.add(name)
-            else:
-              started.add(name)
-          else:
+          elif state not in transit_states:
+            errs.append(RPCError(Faults.FAILED,'%s: bad state/%d' % (name,state)))
             ignore.add(name)
 
-      for name in sorted(unstopped):
+      for name in sorted(unstopped,reverse=True):
         p = get_proc(name)
         if p is None:
           continue
@@ -122,10 +122,11 @@ class RPCInterface(object):
           if msg is not None:
             errs.append(RPCError(Faults.FAILED,'%s: %s' % (name,msg)))
             ignore.add(name)
-        elif state not in STOPPED_STATES:
+        elif state not in STOPPED_STATES and state not in transit_states:
+          errs.append(RPCError(Faults.FAILED,'%s: bad state/%d' % (name,state)))
           ignore.add(name)
 
-      if not unstopped and started.union(ignore) == set(procnames):
+      if not unstopped and started.union(ignore) == allprocs:
         if errs:
           return errs
         return True
