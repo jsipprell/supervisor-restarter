@@ -19,14 +19,23 @@ with Python 3 and higher.
 
 #### Configuration
 
-To configure the restarter XML RPC interface you will need a config snipped or drop file for supervisor containing the following:
+To configure the restarter XML RPC interface you will need a main config section or drop file for supervisor
+containing the following:
 
     [rpcinterface:restarter]
     supervisor.rpcinterface_factory = supervisor.plugins.restarter:make_rpcinterface
     ;delay = 0.1
-    
+    ;timeout = 5.0
+
 The **delay** option can be used to configure the delay, in seconds, between internal "callback" iterations of
 the `restartProcessGroup` rpc call. *A default of 0.2 seconds is used if none is otherwise configured.*
+
+The **timeout** option will configure the maximum amount of time, in seconds, that the xmlrpc method `restartProcessGroup`
+will be allowed to run; although "run" is slightly deceptive because, as indicated above, the underlying method is actually
+non-blocking and is called every **delay** seconds until it indicates the operation is complete. **timeout** simply bounds
+this to a maximum time. Once this time limit has been reached the xmlrpc call will return a Fault or a list containing
+faults (as dictionaries) if prior errors have accumulated. The timeout is not exact as it can only be checked every
+**delay** seconds. *A default timeout of 5 seconds is used if not otherwise configured.*
 
 #### Usage
     
