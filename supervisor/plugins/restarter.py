@@ -164,7 +164,7 @@ class RPCInterface(object):
       # stagger_factor is how "often" we stop procs
       # 2 = every other call
       # 3 = every third call, etc
-      stagger = min(self.stagger_factor or 1,len(unstopped))
+      stagger = min(self.stagger_factor or 1,len(unstopped) or 1)
       stop_modulus = loop_count % stagger
       if not timer.is_started():
         timer.start()
