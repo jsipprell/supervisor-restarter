@@ -85,10 +85,12 @@ class RPCError(xmlrpc.RPCError):
       RPCError.__init__(self,code,extra)
 
 class RPCInterface(object):
-  def __init__(self, supervisord, delay, timeout):
+  def __init__(self, supervisord,delay=None,
+                     timeout=None,stagger_factor=None):
     self.supervisord = supervisord
     self.delay = delay
     self.timeout = timeout
+    self.stagger_factor = stagger_factor
     self._version = None
     super(RPCInterface,self).__init__()
 
@@ -159,6 +161,11 @@ class RPCInterface(object):
 
     def restartem():
       loop_count = timer.inc_counter()
+      # stagger_factor is how "often" we stop procs
+      # 2 = every other call
+      # 3 = every third call, etc
+      stagger = min(self.stagger_factor or 1,len(unstopped))
+      stop_modulus = loop_count % stagger
       if not timer.is_started():
         timer.start()
       elif timer.elapsed() > self.timeout:
@@ -195,10 +202,12 @@ class RPCInterface(object):
               ignore.add(name)
           elif state not in transit_states:
             errs.append(RPCError(RestarterFaults.BAD_STATE,
-                        '%s: bad state during start [%s]' % (name,_get_state_desc(state)))
+                        '%s: bad state during start [%s]' % (name,_get_state_desc(state))))
             ignore.add(name)
 
-      for name in sorted(unstopped,reverse=True):
+      for i,name in enumerate(sorted(unstopped,reverse=True)):
+        if loop_count < stagger and (i % stagger) != stop_modulus:
+          continue
         p = get_proc(name)
         if p is None:
           continue
@@ -226,4 +235,5 @@ class RPCInterface(object):
         
 def make_rpcinterface(supervisord,**config):  
   return RPCInterface(supervisord,delay=float(config.get('delay',0.2)),
-                                  timeout=float(config.get('timeout',5.0)))
+                                  timeout=float(config.get('timeout',5.0)),
+                                  stagger_factor=int(config.get('stagger_factor',1)))
