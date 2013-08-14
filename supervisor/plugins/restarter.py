@@ -76,9 +76,11 @@ class ConfigParser(UnhosedConfigParser):
     return UnhosedConfigParser.has_section(self,section)
 
   def read(self,filenames):
+    from os.path import isfile
+
     if isinstance(filenames,basestring):
       filenames = (filenames,)
-    if filenames and not sum(1 for fn in filenames if os.path.isfile(fn)):
+    if filenames and not sum(1 for fn in filenames if isfile(fn)):
       raise ParsingError, 'no config files found'
     return UnhosedConfigParser.read(self,filenames)
 
@@ -129,7 +131,7 @@ class RPCError(xmlrpc.RPCError):
       else:
         self.text = text
     else:
-      RPCError.__init__(self,code,extra)
+      xmlrpc.RPCError.__init__(self,code,extra)
 
 class RPCInterface(object):
   default_config = {'delay': 0.2,
