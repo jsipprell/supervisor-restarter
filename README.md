@@ -46,7 +46,7 @@ accumulated. The timeout is not exact as it can only be checked every **delay**
 seconds.
 *A default timeout of 5 seconds is used if not otherwise configured.*
 
-The **stagger** option configures how many iterations (call of the internal
+The **stagger_factor** option configures how many iterations (call of the internal
 handler every **delay** seconds) it takes to stop all processes. This is useful
 because the restarter will first try to start any processes that have completed
 stopping before it goes on to stop the next set, thus staggering can cause less
