@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from ConfigParser import NoOptionError,NoSectionError,ParsingError
+from ConfigParser import Error as ConfigParserError
 from time import time
 import pkg_resources
 pkg_resources.require('supervisor >= 3.0a')
@@ -21,7 +23,9 @@ from supervisor.xmlrpc import Faults
 from supervisor.states import RUNNING_STATES,STOPPED_STATES,\
                               ProcessStates,SupervisorStates,\
                               getProcessStateDescription
+from supervisor.options import UnhosedConfigParser
 from supervisor.http import NOT_DONE_YET
+
 from weakref import WeakValueDictionary
 
 API_VERSION = '3.0'
@@ -34,6 +38,49 @@ def _get_state_desc(state):
   if desc:
     return desc
   return str(state)
+
+_marker = object()
+class ConfigParser(UnhosedConfigParser):
+  mysection = 'rpcinterface:restarter'
+
+  def getint(self,option,default=_marker):
+    try:
+      return UnhosedConfigParser.getint(self,self.mysection,option)
+    except NoOptionError:
+      if default is _marker:
+        raise
+      return default
+
+  def getfloat(self,option,default=_marker):
+    try:
+      return UnhosedConfigParser.getfloat(self,self.mysection,option)
+    except NoOptionError:
+      if default is _marker:
+        raise
+      return default
+
+  def getboolean(self,option,default=_marker):
+    try:
+      return UnhosedConfigParser.getboolean(self,self.mysection,option)
+    except NoOptionError:
+      if default is _marker:
+        raise
+      return default
+
+  def items(self):
+    return UnhosedConfigParser.items(self,self.mysection)
+
+  def has_section(self,section=None):
+    if section is None:
+      section = self.mysection
+    return UnhosedConfigParser.has_section(self,section)
+
+  def read(self,filenames):
+    if isinstance(filenames,basestring):
+      filenames = (filenames,)
+    if filenames and not sum(1 for fn in filenames if os.path.isfile(fn)):
+      raise ParsingError, 'no config files found'
+    return UnhosedConfigParser.read(self,filenames)
 
 class Timer(object):
   __slots__ = ('start_time','_counter')
@@ -85,19 +132,72 @@ class RPCError(xmlrpc.RPCError):
       RPCError.__init__(self,code,extra)
 
 class RPCInterface(object):
-  def __init__(self, supervisord,delay=None,
-                     timeout=None,stagger_factor=None):
+  default_config = {'delay': 0.2,
+                    'timeout': 5.0,
+                    'stagger_factor': 1}
+
+  def __init__(self, supervisord, config):
     self.supervisord = supervisord
-    self.delay = delay
-    self.timeout = timeout
-    self.stagger_factor = stagger_factor
     self._version = None
+    self._config(config.items())
     super(RPCInterface,self).__init__()
+
+  def _get_config(self):
+    return dict((k,getattr(self,k)) for k in self.default_config.keys())
+
+  def _config(self,items):
+    cdict = self.default_config.copy()
+    for k,v in items:
+      if k in cdict:
+        setattr(self,k,type(cdict[k])(v))
+
+    for k,v in self.default_config.items():
+      if k not in self.__dict__:
+        setattr(self,k,v)
 
   def _update(self,text):
     self.update_text = text
     if self.supervisord.options.mood < SupervisorStates.RUNNING:
       raise RPCError(Faults.SHUTDOWN_STATE)
+
+  def reconfigureFrom(self,data):
+    '''Reconfigure the plugin from a hash containing configurtion key,value pairs.
+
+    @param struct data        a hash of key,value pairs
+    @returns struct config    a hash of current configuration options (after update)
+    '''
+    if not isinstance(data,dict):
+      raise RPCError(Faults.INCORRECT_PARAMETERS)
+
+    updates = dict()
+    for k,v in data.items():
+      try:
+        updates[k] = type(self.default_config[k])(v)
+      except KeyError:
+        raise RPCError(Faults.BAD_ARGUMENTS,'%r is not a valid configuration option' % k)
+      except ValueError:
+        raise RPCError(Faults.BAD_ARGUMENTS,'%r does not have the correct value type' % k)
+
+    if updates:
+      self._config(updates.items())
+    return self._get_config()
+
+  def reconfigure(self,*filenames):
+    '''Reconfigure the plugin from one or more config files. If no filenames
+are passed, returns a hash of the current configuration.
+
+    @return struct config  a hash of current configuration options (after update)
+    '''
+    if filenames:
+      parser = ConfigParser(defaults=dict((k,str(v)) for k,v in self.default_config.items()))
+      try:
+        parser.read(filenames)
+      except ConfigParserError, e:
+        raise RPCError(Faults.FAILED,str(e))
+      if not parser.has_section():
+        raise RPCError(Faults.FAILED,'config file(s) has no [%s] section.' % parser.mysection)
+      self._config(parser.items())
+    return self._get_config()
 
   def getPluginVersion(self):
     '''Return the plugin version that provides rpc methods for this namespace.
@@ -234,6 +334,4 @@ class RPCInterface(object):
     return restartem
         
 def make_rpcinterface(supervisord,**config):  
-  return RPCInterface(supervisord,delay=float(config.get('delay',0.2)),
-                                  timeout=float(config.get('timeout',5.0)),
-                                  stagger_factor=int(config.get('stagger_factor',1)))
+  return RPCInterface(supervisord,config)
