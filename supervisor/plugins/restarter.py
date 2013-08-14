@@ -82,7 +82,7 @@ class RPCError(xmlrpc.RPCError):
       else:
         self.text = text
     else:
-      RPCError.__init__(self,code,extra)
+      xmlrpc.RPCError.__init__(self,code,extra)
 
 class RPCInterface(object):
   def __init__(self, supervisord,delay=None,
